@@ -14,11 +14,10 @@ st.write(
 )
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-st.write(f"Using device: `{device}`")
 
 # Load models 
 encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
-llm_name = "sshleifer/tiny-gpt2"
+llm_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 gen_tokenizer, gen_model = st.cache_resource(lambda: (
     AutoTokenizer.from_pretrained(llm_name),
     AutoModelForCausalLM.from_pretrained(
@@ -33,14 +32,11 @@ corpus = st.cache_resource(lambda: {
 emb_path = "collection/embeddings.npy"
 if os.path.exists(emb_path):
     passage_embeddings = st.cache_resource(lambda: np.load(emb_path, allow_pickle=True).item())()
-    st.write(f"Loaded {len(passage_embeddings)} precomputed embeddings.")
 else:
-    st.write("No precomputed embeddings found. Computing new ones...")
     ids, texts = list(corpus.keys()), list(corpus.values())
     embs = encoder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
     passage_embeddings = dict(zip(ids, embs))
     np.save(emb_path, passage_embeddings)
-    st.write("Embeddings computed and saved.")
 
 # -----------------------------
 # Streamlit UI
@@ -79,7 +75,7 @@ if st.button("Submit"):
 
         if top_docs:
             st.markdown("---")
-            st.subheader("Top Retrieved Passages")
+            st.subheader("Top 3 Retrieved Documents")
             for i, doc in enumerate(top_docs, 1):
                 with st.expander(f"Passage {i} (score={doc['score']})"):
                     st.write(doc["content"])
