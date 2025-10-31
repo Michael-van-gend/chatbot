@@ -6,6 +6,14 @@ import numpy as np
 import csv
 from tqdm import tqdm
 from transformers import BertModel, BertTokenizer, AutoModelForCausalLM, AutoTokenizer
+import traceback
+
+try:
+    st.write("App is starting...")
+    st.title("✅ Streamlit App Loaded Successfully")
+except Exception as e:
+    st.error(f"App crashed: {e}")
+    st.code(traceback.format_exc())
 
 # -----------------------------
 # Setup
