@@ -10,7 +10,8 @@ st.write("Ask a question and get the top-3 relevant passages along with an AI-ge
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-client = OpenAI(api_key="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")
+api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=api_key)
 
 encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
 
