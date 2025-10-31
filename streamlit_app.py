@@ -1,51 +1,85 @@
-import streamlit as st, pkg_resources, traceback, os
-import torch, json, numpy as np
+import streamlit as st, os, json, numpy as np, torch
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Basic setup & diagnostics
+# -----------------------------
+# Basic setup
+# -----------------------------
 st.set_page_config(page_title="RAG Information Retrieval App", layout="wide")
 
-st.write("Ask a question and return the top-3 most relevant documents and an LLM-generated response based on these.")
+st.title("RAG Information Retrieval App")
+st.write(
+    "Ask a question to retrieve the top-3 most relevant documents "
+    "and generate a response using a small local language model."
+)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 st.write(f"Using device: `{device}`")
 
-# Load embedding model
-
-@st.cache_resource
-encoder = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Load LLM
-
-@st.cache_resource
+# Load models 
+encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
 llm_name = "sshleifer/tiny-gpt2"
-gen_tokenizer = AutoTokenizer.from_pretrained(llm_name)
-gen_model = AutoModelForCausalLM.from_pretrained(
-    llm_name, torch_dtype=torch.float32, low_cpu_mem_usage=True
-).to(device)
+gen_tokenizer, gen_model = st.cache_resource(lambda: (
+    AutoTokenizer.from_pretrained(llm_name),
+    AutoModelForCausalLM.from_pretrained(
+        llm_name, torch_dtype=torch.float32, low_cpu_mem_usage=True
+    ).to(device)
+))()
+corpus = st.cache_resource(lambda: {
+    d["id"]: d["contents"] for d in
+    [json.loads(line) for line in open("collection/sampled_collection.jsonl", "r", encoding="utf-8")]
+})()
 
-# Load corpus
-@st.cache_resource
-corpus = {}
-with open("collection/sampled_collection.jsonl", "r", encoding="utf-8") as f:
-    for line in f:
-        d = json.loads(line)
-        corpus[d["id"]] = d["contents"]
+emb_path = "collection/embeddings.npy"
+if os.path.exists(emb_path):
+    passage_embeddings = st.cache_resource(lambda: np.load(emb_path, allow_pickle=True).item())()
+    st.write(f"Loaded {len(passage_embeddings)} precomputed embeddings.")
+else:
+    st.write("No precomputed embeddings found. Computing new ones...")
+    ids, texts = list(corpus.keys()), list(corpus.values())
+    embs = encoder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+    passage_embeddings = dict(zip(ids, embs))
+    np.save(emb_path, passage_embeddings)
+    st.write("Embeddings computed and saved.")
 
-corpus = load_corpus()
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+query = st.text_input("Enter your question:", placeholder="e.g. Who discovered penicillin?")
 
-# Load or compute embeddings
-@st.cache_resource
-def load_or_compute_embeddings(corpus):
-    try:
-        emb_path = "collection/embeddings.npy"
-        if os.path.exists(emb_path):
-            st.write("Found precomputed embeddings. Loading...")
-            data = np.load(emb_path, allow_pickle=True).item()
-            st.write(f"Loaded {len(data)} embeddings.")
-            return data
-        else:
-            st.write("No precomputed embeddings found. Computing new embeddings...")
-            ids, texts = list(corpus.keys()), list(corpus.values())
-            embs = encoder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+if st.button("Submit"):
+    if not query.strip():
+        st.warning("Please enter a question.")
+    else:
+        with st.spinner("Retrieving and generating answer..."):
+            # Retrieval
+            q_emb = encoder.encode(query, normalize_embeddings=True)
+            scores = [(pid, float(np.dot(q_emb, p_emb))) for pid, p_emb in passage_embeddings.items()]
+            scores.sort(key=lambda x: x[1], reverse=True)
+            top_docs = [{"id": pid, "content": corpus[pid], "score": round(score, 3)} for pid, score in scores[:3]]
+
+            # Generation
+            if not top_docs:
+                answer = "No retrieved passages available."
+            else:
+                context = "\n".join([f"- {d['content']}" for d in top_docs])
+                prompt = f"Answer this question using only the context below.\n\n{context}\n\nQuestion: {query}\nAnswer:"
+                try:
+                    input_ids = gen_tokenizer.encode(prompt, return_tensors="pt").to(device)
+                    with torch.no_grad():
+                        out = gen_model.generate(input_ids, max_new_tokens=100, temperature=0.7)
+                    answer = gen_tokenizer.decode(out[0], skip_special_tokens=True).strip()
+                except Exception as e:
+                    st.error("Answer generation failed:")
+                    st.code(traceback.format_exc())
+                    answer = "An error occurred during text generation."
+
+        st.subheader("Generated Answer")
+        st.success(answer)
+
+        if top_docs:
+            st.markdown("---")
+            st.subheader("Top Retrieved Passages")
+            for i, doc in enumerate(top_docs, 1):
+                with st.expander(f"Passage {i} (score={doc['score']})"):
+                    st.write(doc["content"])
