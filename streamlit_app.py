@@ -1,7 +1,7 @@
 import streamlit as st
 import os, json, numpy as np, torch
 from sentence_transformers import SentenceTransformer
-import openai
+from openai import OpenAI
 
 st.set_page_config(page_title="RAG + OpenAI", layout="wide")
 
