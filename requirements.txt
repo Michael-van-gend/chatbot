@@ -1,8 +1,6 @@
 streamlit
-openai
 torch
 transformers
+sentence-transformers
 tqdm
-pyserini
 numpy
-pandas
