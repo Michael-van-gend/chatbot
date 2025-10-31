@@ -17,7 +17,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Load models 
 encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
-llm_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+llm_name = "TheBloke/TinyLlama‑1.1B‑intermediate‑step‑715k‑1.5T‑AWQ"
 gen_tokenizer, gen_model = st.cache_resource(lambda: (
     AutoTokenizer.from_pretrained(llm_name),
     AutoModelForCausalLM.from_pretrained(
