@@ -38,7 +38,7 @@ encoder = load_embedding_model()
 # -----------------------------
 @st.cache_resource
 def load_llm():
-    llm = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    llm = "microsoft/phi-2"
     model = AutoModelForCausalLM.from_pretrained(llm).to(device)
     tokenizer = AutoTokenizer.from_pretrained(llm)
     return model, tokenizer
