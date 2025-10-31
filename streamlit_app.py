@@ -45,7 +45,7 @@ def retrieve_top_docs(query_emb, embeddings, corpus, top_k=3):
 # -----------------------------
 @st.cache_resource
 def get_openai_client():
-    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    return OpenAI(api_key=st.secrets["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"])
 
 def encode_query_openai(query):
     client = get_openai_client()
