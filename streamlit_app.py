@@ -10,7 +10,7 @@ st.write("Ask a question and get the top-3 relevant passages along with an AI-ge
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-openai.api_key = "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"
+client = OpenAI(api_key="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")
 
 encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
 
@@ -47,13 +47,14 @@ if st.button("Submit"):
                 prompt = f"Answer the question using only the context below.\n\n{context}\n\nQuestion: {query}\nAnswer:"
 
                 try:
-                    response = openai.ChatCompletion.create(
+                    response = client.chat.completions.create(
                         model="gpt-3.5-turbo",
                         messages=[{"role": "user", "content": prompt}],
                         max_tokens=250,
                         temperature=0.7
                     )
-                    answer = response['choices'][0]['message']['content'].strip()
+                    
+                    answer = response.choices[0].message.content
                 except Exception as e:
                     st.error(f"OpenAI API request failed: {e}")
                     answer = "Could not generate an answer."
