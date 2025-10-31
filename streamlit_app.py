@@ -10,8 +10,9 @@ st.write("Ask a question and get the top-3 relevant passages along with an AI-ge
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-api_key = st.secrets["OPENAI_API_KEY"]
-client = OpenAI(api_key=api_key)
+api_key = st.secrets["open_ai_key"]
+os.environ["OPENAI_API_KEY"] = api_key  # Set it in the environment
+client = OpenAI()
 
 encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
 
