@@ -1,11 +1,19 @@
 # streamlit_app.py
-import streamlit as st
+import streamlit as st, pkg_resources
 import torch
 import json
 import numpy as np
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+st.write("✅ Packages Installed:")
+for pkg in ["sentence-transformers", "torch", "transformers"]:
+    try:
+        version = pkg_resources.get_distribution(pkg).version
+        st.write(f"{pkg}: {version}")
+    except Exception as e:
+        st.write(f"{pkg}: not found ({e})")
 
 # -----------------------------
 # App setup
