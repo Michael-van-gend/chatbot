@@ -1,82 +1,98 @@
+# streamlit_app.py
 import streamlit as st
+import torch
 import json
 import numpy as np
-from openai import OpenAI
+from tqdm import tqdm
+from sentence_transformers import SentenceTransformer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # -----------------------------
-# Streamlit setup
+# App setup
 # -----------------------------
-st.set_page_config(page_title="Cloud RAG Demo", layout="wide")
-st.title("🧠 Cloud-Optimized RAG App (Fast & Lightweight)")
-st.write("Ask a question. The app retrieves passages via precomputed embeddings and uses GPT for generation.")
+st.set_page_config(page_title="RAG Demo", layout="wide")
+st.title("🧠 Mini RAG (Local Embeddings + LLM)")
+st.write("Ask a question. The app retrieves passages using local embeddings and generates an answer using TinyLlama — no API keys needed!")
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # -----------------------------
-# Load data + embeddings
+# Load embedding model
 # -----------------------------
 @st.cache_resource
-def load_corpus_and_embeddings():
-    # Load corpus
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+encoder = load_embedding_model()
+
+# -----------------------------
+# Load LLM (TinyLlama)
+# -----------------------------
+@st.cache_resource
+def load_llm():
+    llm = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    model = AutoModelForCausalLM.from_pretrained(llm).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(llm)
+    return model, tokenizer
+
+gen_model, gen_tokenizer = load_llm()
+
+# -----------------------------
+# Load corpus
+# -----------------------------
+@st.cache_resource
+def load_corpus():
+    corpus = {}
     with open("collection/sampled_collection.jsonl", "r", encoding="utf-8") as f:
-        corpus = {}
         for line in f:
             d = json.loads(line)
             corpus[d["id"]] = d["contents"]
+    return corpus
 
-    # Load precomputed embeddings (saved as a dict of {id: embedding})
-    embeddings = np.load("collection/embeddings.npy", allow_pickle=True).item()
-    return corpus, embeddings
+corpus = load_corpus()
 
-corpus, embeddings = load_corpus_and_embeddings()
+# -----------------------------
+# Precompute embeddings
+# -----------------------------
+@st.cache_resource
+def compute_embeddings(corpus):
+    ids, texts = list(corpus.keys()), list(corpus.values())
+    embs = encoder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+    return dict(zip(ids, embs))
+
+passage_embeddings = compute_embeddings(corpus)
 
 # -----------------------------
 # Retrieval
 # -----------------------------
-def retrieve_top_docs(query_emb, embeddings, corpus, top_k=3):
-    scores = []
-    for pid, p_emb in embeddings.items():
-        score = float(np.dot(query_emb, p_emb) / (np.linalg.norm(query_emb) * np.linalg.norm(p_emb)))
-        scores.append((pid, score))
+def retrieve_top_docs(query, top_k=3):
+    q_emb = encoder.encode(query, normalize_embeddings=True)
+    scores = [(pid, float(np.dot(q_emb, p_emb))) for pid, p_emb in passage_embeddings.items()]
     scores.sort(key=lambda x: x[1], reverse=True)
     top = scores[:top_k]
     return [{"id": pid, "content": corpus[pid], "score": round(score, 3)} for pid, score in top]
 
 # -----------------------------
-# Query embedding (using OpenAI)
+# Generation
 # -----------------------------
-@st.cache_resource
-def get_openai_client():
-    return OpenAI(api_key=st.secrets["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"])
+def generate_answer(query, retrieved_docs):
+    context = "\n".join([f"- {d['content']}" for d in retrieved_docs])
+    messages = [
+        {"role": "system", "content": "You are a concise and factual assistant."},
+        {"role": "user", "content": f"Answer this question using only the context below. Be concise.\n\n{context}\n\nQuestion: {query}"}
+    ]
 
-def encode_query_openai(query):
-    client = get_openai_client()
-    response = client.embeddings.create(
-        input=query,
-        model="text-embedding-3-small"
-    )
-    return np.array(response.data[0].embedding)
+    txt = gen_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    input_ids = gen_tokenizer.encode(txt, return_tensors="pt").to(device)
+    input_len = input_ids.shape[1]
 
-# -----------------------------
-# Answer generation (OpenAI)
-# -----------------------------
-def generate_answer_openai(query, retrieved_docs):
-    client = get_openai_client()
-    context = "\n\n".join([d["content"] for d in retrieved_docs])
-    prompt = f"Answer the question based only on the passages below.\n\n{context}\n\nQuestion: {query}\nAnswer:"
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a concise and factual assistant."},
-            {"role": "user", "content": prompt},
-        ],
-        max_tokens=256,
-        temperature=0.3,
-    )
-
-    return response.choices[0].message.content.strip()
+    with torch.no_grad():
+        out = gen_model.generate(input_ids, max_new_tokens=200, temperature=0.7)
+    resp = gen_tokenizer.decode(out[0][input_len:], skip_special_tokens=True)
+    return resp.strip()
 
 # -----------------------------
-# UI
+# Streamlit UI
 # -----------------------------
 query = st.text_input("💬 Your question:", placeholder="e.g. Who discovered penicillin?")
 
@@ -85,9 +101,8 @@ if st.button("Ask"):
         st.warning("Please enter a question.")
     else:
         with st.spinner("Retrieving and generating answer..."):
-            query_emb = encode_query_openai(query)
-            top_docs = retrieve_top_docs(query_emb, embeddings, corpus, top_k=3)
-            answer = generate_answer_openai(query, top_docs)
+            top_docs = retrieve_top_docs(query, top_k=3)
+            answer = generate_answer(query, top_docs)
 
         st.subheader("🧩 Generated Answer")
         st.success(answer)
