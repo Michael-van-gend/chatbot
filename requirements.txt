@@ -1,2 +1,8 @@
 streamlit
 openai
+torch
+transformers
+tqdm
+pyserini
+numpy
+pandas
