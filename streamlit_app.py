@@ -1,112 +1,82 @@
-# app.py
 import streamlit as st
-import torch
 import json
 import numpy as np
-import csv
-from tqdm import tqdm
-from transformers import BertModel, BertTokenizer, AutoModelForCausalLM, AutoTokenizer
-import traceback
-
-try:
-    st.write("App is starting...")
-    st.title("✅ Streamlit App Loaded Successfully")
-except Exception as e:
-    st.error(f"App crashed: {e}")
-    st.code(traceback.format_exc())
+from openai import OpenAI
 
 # -----------------------------
-# Setup
+# Streamlit setup
 # -----------------------------
-st.set_page_config(page_title="RAG Demo", layout="wide")
-st.title("🧠 DPR + LLM Retrieval-Augmented Generation")
-st.write("Ask a question. The app retrieves passages using DPR embeddings and generates an answer using TinyLlama.")
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-@st.cache_resource
-def load_models():
-    # DPR Encoder
-    dpr_encoder = BertModel.from_pretrained("ielabgroup/StandardBERT-DR").to(device).eval()
-    dpr_tokenizer = BertTokenizer.from_pretrained("ielabgroup/StandardBERT-DR")
-
-    # LLM for generation
-    llm = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    gen_model = AutoModelForCausalLM.from_pretrained(llm).to(device)
-    gen_tokenizer = AutoTokenizer.from_pretrained(llm)
-
-    return dpr_encoder, dpr_tokenizer, gen_model, gen_tokenizer
-
-dpr_encoder, dpr_tokenizer, gen_model, gen_tokenizer = load_models()
+st.set_page_config(page_title="Cloud RAG Demo", layout="wide")
+st.title("🧠 Cloud-Optimized RAG App (Fast & Lightweight)")
+st.write("Ask a question. The app retrieves passages via precomputed embeddings and uses GPT for generation.")
 
 # -----------------------------
-# Load collection
+# Load data + embeddings
 # -----------------------------
 @st.cache_resource
-def load_collection():
-    corpus = {}
+def load_corpus_and_embeddings():
+    # Load corpus
     with open("collection/sampled_collection.jsonl", "r", encoding="utf-8") as f:
+        corpus = {}
         for line in f:
             d = json.loads(line)
             corpus[d["id"]] = d["contents"]
-    return corpus
 
-corpus = load_collection()
+    # Load precomputed embeddings (saved as a dict of {id: embedding})
+    embeddings = np.load("collection/embeddings.npy", allow_pickle=True).item()
+    return corpus, embeddings
 
-# -----------------------------
-# Precompute passage embeddings
-# -----------------------------
-@st.cache_resource
-def compute_passage_embeddings(corpus):
-    passage_embeddings = {}
-    with torch.no_grad():
-        for pid, text in tqdm(corpus.items(), desc="Encoding passages"):
-            inputs = dpr_tokenizer([text], return_tensors="pt", padding=True, truncation=True).to(device)
-            emb = dpr_encoder(**inputs)[0][:, 0, :]  # CLS token
-            passage_embeddings[pid] = emb.cpu().numpy().flatten()
-    return passage_embeddings
-
-passage_embeddings = compute_passage_embeddings(corpus)
+corpus, embeddings = load_corpus_and_embeddings()
 
 # -----------------------------
-# Helper functions
+# Retrieval
 # -----------------------------
-def encode_query(query):
-    inputs = dpr_tokenizer([query], return_tensors="pt", padding=True, truncation=True).to(device)
-    with torch.no_grad():
-        emb = dpr_encoder(**inputs)[0][:, 0, :]
-    return emb.cpu().numpy().flatten()
-
-def retrieve_top_docs(query, top_k=3):
-    q_emb = encode_query(query)
+def retrieve_top_docs(query_emb, embeddings, corpus, top_k=3):
     scores = []
-    for pid, p_emb in passage_embeddings.items():
-        score = float(np.dot(q_emb, p_emb))
+    for pid, p_emb in embeddings.items():
+        score = float(np.dot(query_emb, p_emb) / (np.linalg.norm(query_emb) * np.linalg.norm(p_emb)))
         scores.append((pid, score))
     scores.sort(key=lambda x: x[1], reverse=True)
     top = scores[:top_k]
     return [{"id": pid, "content": corpus[pid], "score": round(score, 3)} for pid, score in top]
 
-def generate_answer(query, retrieved_docs):
-    context = ""
-    for d in retrieved_docs:
-        context += "- " + d["content"] + "\n"
+# -----------------------------
+# Query embedding (using OpenAI)
+# -----------------------------
+@st.cache_resource
+def get_openai_client():
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-    messages = [
-        {"role": "system", "content": "You are a concise and factual assistant."},
-        {"role": "user", "content": f"Answer this question using only the information below. Do not explain.\n\n{context}\nQuestion: {query}"}
-    ]
-    txt = gen_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    input_ids = gen_tokenizer.encode(txt, return_tensors="pt").to(device)
-    input_len = input_ids.shape[1]
-
-    with torch.no_grad():
-        out = gen_model.generate(input_ids, max_new_tokens=256, temperature=0.7)
-    resp = gen_tokenizer.decode(out[0][input_len:], skip_special_tokens=True)
-    return resp.strip()
+def encode_query_openai(query):
+    client = get_openai_client()
+    response = client.embeddings.create(
+        input=query,
+        model="text-embedding-3-small"
+    )
+    return np.array(response.data[0].embedding)
 
 # -----------------------------
-# Streamlit UI
+# Answer generation (OpenAI)
+# -----------------------------
+def generate_answer_openai(query, retrieved_docs):
+    client = get_openai_client()
+    context = "\n\n".join([d["content"] for d in retrieved_docs])
+    prompt = f"Answer the question based only on the passages below.\n\n{context}\n\nQuestion: {query}\nAnswer:"
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a concise and factual assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=256,
+        temperature=0.3,
+    )
+
+    return response.choices[0].message.content.strip()
+
+# -----------------------------
+# UI
 # -----------------------------
 query = st.text_input("💬 Your question:", placeholder="e.g. Who discovered penicillin?")
 
@@ -115,8 +85,9 @@ if st.button("Ask"):
         st.warning("Please enter a question.")
     else:
         with st.spinner("Retrieving and generating answer..."):
-            top_docs = retrieve_top_docs(query, top_k=3)
-            answer = generate_answer(query, top_docs)
+            query_emb = encode_query_openai(query)
+            top_docs = retrieve_top_docs(query_emb, embeddings, corpus, top_k=3)
+            answer = generate_answer_openai(query, top_docs)
 
         st.subheader("🧩 Generated Answer")
         st.success(answer)
