@@ -6,6 +6,8 @@ from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
 st.set_page_config(page_title="RAG Demo", layout="wide")
+st.title("Information Retrieval using DPR and RAG using Groq")
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 encoder = SentenceTransformer("all-MiniLM-L6-v2")
