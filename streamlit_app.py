@@ -1,56 +1,84 @@
 import streamlit as st
-from openai import OpenAI
+import random
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# ---------------------------
+# Dummy data (replace with real retrieval & generation later)
+# ---------------------------
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+DUMMY_DOCUMENTS = [
+    {
+        "id": "doc1",
+        "content": "Alexander Fleming discovered penicillin in 1928 at St. Mary's Hospital in London.",
+    },
+    {
+        "id": "doc2",
+        "content": "Penicillin is derived from the Penicillium mold and was the first true antibiotic.",
+    },
+    {
+        "id": "doc3",
+        "content": "The discovery of penicillin revolutionized modern medicine and earned Fleming a Nobel Prize.",
+    },
+    {
+        "id": "doc4",
+        "content": "Marie Curie discovered polonium and radium and won two Nobel Prizes for her work in radioactivity.",
+    },
+    {
+        "id": "doc5",
+        "content": "The theory of relativity was proposed by Albert Einstein in the early 20th century.",
+    },
+]
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# ---------------------------
+# Dummy retrieval and generation functions
+# ---------------------------
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+def retrieve_top_docs(query, k=3):
+    """Simulate retrieval by picking top-k documents with random scores."""
+    random.shuffle(DUMMY_DOCUMENTS)
+    top_docs = DUMMY_DOCUMENTS[:k]
+    return [
+        {
+            "id": doc["id"],
+            "content": doc["content"],
+            "score": round(random.uniform(0.7, 1.0), 3),
+        }
+        for doc in top_docs
+    ]
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+def generate_answer(query, docs):
+    """Simulate generation by combining key sentences from retrieved docs."""
+    joined = " ".join([d["content"] for d in docs])
+    answer = f"Based on the documents, the answer to '{query}' is: {joined.split('.')[0]}."
+    return answer
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# ---------------------------
+# Streamlit UI
+# ---------------------------
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+st.set_page_config(page_title="Mini RAG Demo", layout="wide")
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+st.title("🧠 Retrieval-Augmented Generation (RAG) Demo")
+st.write("Enter a question below. The app retrieves the top-3 relevant passages and generates an answer.")
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# Query input
+query = st.text_input("💬 Your question:", placeholder="e.g. Who discovered penicillin?")
+
+# Button to run the pipeline
+if st.button("Ask"):
+    if not query.strip():
+        st.warning("Please enter a question.")
+    else:
+        with st.spinner("Retrieving and generating answer..."):
+            # Backend logic
+            top_docs = retrieve_top_docs(query, k=3)
+            answer = generate_answer(query, top_docs)
+
+        # Display results
+        st.subheader("🧩 Generated Answer")
+        st.success(answer)
+
+        st.markdown("---")
+        st.subheader("📚 Top-3 Retrieved Passages")
+        for i, doc in enumerate(top_docs, 1):
+            with st.expander(f"Passage {i} (score={doc['score']})"):
+                st.write(doc["content"])
