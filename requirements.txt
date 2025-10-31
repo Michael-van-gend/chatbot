@@ -4,3 +4,4 @@ transformers==4.57.1
 sentence-transformers==5.1.2
 tqdm==4.67.1
 numpy==2.3.4
+openai
