@@ -1,16 +1,16 @@
 # streamlit_app.py
-import streamlit as st, pkg_resources, traceback
+import streamlit as st, pkg_resources, traceback, os
 import torch, json, numpy as np
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # -----------------------------
-# Basic diagnostic info
+# Basic setup & diagnostics
 # -----------------------------
 st.set_page_config(page_title="RAG Demo", layout="wide")
 
 st.title("🧠 Mini RAG (Local Embeddings + LLM)")
-st.write("Lightweight retrieval + generation demo (no API keys, safe for Streamlit Cloud).")
+st.write("Ask a question. Retrieval uses precomputed local embeddings — no API keys needed!")
 
 st.write("✅ Packages Installed:")
 for pkg in ["sentence-transformers", "torch", "transformers"]:
@@ -41,18 +41,16 @@ def load_embedding_model():
 encoder = load_embedding_model()
 
 # -----------------------------
-# Load LLM (tiny + safe)
+# Load tiny LLM (cloud-safe)
 # -----------------------------
 @st.cache_resource
 def load_llm():
     try:
-        st.write("⏳ Loading language model (tiny GPT-2 variant)...")
-        llm_name = "sshleifer/tiny-gpt2"  # <100 MB
+        st.write("⏳ Loading lightweight language model...")
+        llm_name = "sshleifer/tiny-gpt2"
         tokenizer = AutoTokenizer.from_pretrained(llm_name)
         model = AutoModelForCausalLM.from_pretrained(
-            llm_name,
-            torch_dtype=torch.float32,
-            low_cpu_mem_usage=True
+            llm_name, torch_dtype=torch.float32, low_cpu_mem_usage=True
         ).to(device)
         st.write("✅ LLM loaded successfully.")
         return model, tokenizer
@@ -85,25 +83,32 @@ def load_corpus():
 corpus = load_corpus()
 
 # -----------------------------
-# Precompute embeddings
+# Load or compute embeddings
 # -----------------------------
 @st.cache_resource
-def compute_embeddings(corpus):
+def load_or_compute_embeddings(corpus):
     try:
-        if not corpus:
-            st.warning("⚠️ No corpus loaded, skipping embeddings.")
-            return {}
-        st.write("⏳ Computing embeddings...")
-        ids, texts = list(corpus.keys()), list(corpus.values())
-        embs = encoder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
-        st.write("✅ Embeddings ready.")
-        return dict(zip(ids, embs))
+        emb_path = "collection/embeddings.npy"
+
+        if os.path.exists(emb_path):
+            st.write("📂 Found precomputed embeddings. Loading...")
+            data = np.load(emb_path, allow_pickle=True).item()
+            st.write(f"✅ Loaded {len(data)} embeddings.")
+            return data
+        else:
+            st.write("⚙️ No precomputed embeddings found — computing...")
+            ids, texts = list(corpus.keys()), list(corpus.values())
+            embs = encoder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+            emb_dict = dict(zip(ids, embs))
+            np.save(emb_path, emb_dict)
+            st.write("✅ Embeddings computed and saved to disk.")
+            return emb_dict
     except Exception as e:
-        st.error("❌ Failed during embedding computation:")
+        st.error("❌ Failed to load or compute embeddings:")
         st.code(traceback.format_exc())
         return {}
 
-passage_embeddings = compute_embeddings(corpus)
+passage_embeddings = load_or_compute_embeddings(corpus)
 
 # -----------------------------
 # Retrieval
@@ -158,3 +163,4 @@ if st.button("Ask"):
             for i, doc in enumerate(top_docs, 1):
                 with st.expander(f"Passage {i} (score={doc['score']})"):
                     st.write(doc["content"])
+                    
