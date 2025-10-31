@@ -10,9 +10,13 @@ st.write("Ask a question and get the top-3 relevant passages along with an AI-ge
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-api_key = st.secrets["OPENAI_API_KEY"]
-os.environ["OPENAI_API_KEY"] = api_key  # Set it in the environment
-client = OpenAI()
+api_key = st.secrets["groq_key"]
+os.environ["GROQ_API_KEY"] = api_key
+
+client = OpenAI(
+    api_key=os.environ.get("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+)
 
 encoder = st.cache_resource(lambda: SentenceTransformer("all-MiniLM-L6-v2"))()
 
@@ -49,7 +53,7 @@ if st.button("Submit"):
                 prompt = f"Answer the question using only the context below.\n\n{context}\n\nQuestion: {query}\nAnswer:"
 
                 try:
-                    response = client.chat.completions.create(
+                    response = client.responses.create(
                         model="gpt-3.5-turbo",
                         messages=[{"role": "user", "content": prompt}],
                         max_tokens=250,
