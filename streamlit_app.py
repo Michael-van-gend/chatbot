@@ -30,7 +30,7 @@ st.write(f"🖥 Using device: `{device}`")
 def load_embedding_model():
     try:
         st.write("⏳ Loading embedding model...")
-        model = SentenceTransformer("HuggingFaceH4/zephyr-0.5b-beta")
+        model = SentenceTransformer("all-MiniLM-L6-v2")
         st.write("✅ Embedding model loaded.")
         return model
     except Exception as e:
